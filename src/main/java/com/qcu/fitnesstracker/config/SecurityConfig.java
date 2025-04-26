@@ -19,6 +19,9 @@ public class SecurityConfig {
 						.requestMatchers("/auth/google-login", "/oauth2/**", "/auth/logout").permitAll()
 						.requestMatchers("/api/workouts/nearby", "/auth/success").permitAll()
 
+						.requestMatchers("/api/nutrition/**").permitAll()
+						.requestMatchers("/api/meals/**").permitAll()
+
 						// ✅ Allow ALL Strava endpoints without authentication
 						.requestMatchers("/api/strava/**").permitAll()
 						.requestMatchers("/api/strava/login", "/api/strava/callback", "/api/strava/token").permitAll() // Allow Strava callback and token retrieval without Google login
