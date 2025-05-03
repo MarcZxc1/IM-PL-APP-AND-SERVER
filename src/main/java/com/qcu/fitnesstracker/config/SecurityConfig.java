@@ -21,6 +21,8 @@ public class SecurityConfig {
 
 						.requestMatchers("/api/nutrition/**").permitAll()
 						.requestMatchers("/api/meals/**").permitAll()
+						.requestMatchers("/api/meals/suggest/**").permitAll()
+
 
 						// ✅ Allow ALL Strava endpoints without authentication
 						.requestMatchers("/api/strava/**").permitAll()
