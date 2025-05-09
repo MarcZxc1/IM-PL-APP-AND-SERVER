@@ -23,6 +23,14 @@ public class SecurityConfig {
 						.requestMatchers("/api/meals/**").permitAll()
 						.requestMatchers("/api/meals/suggest/**").permitAll()
 
+						.requestMatchers("/api/fitbit/steps").permitAll()
+						.requestMatchers("/api/fitbit/callback").permitAll()
+						.requestMatchers("/api/fitbit/energy").permitAll()
+
+
+						.requestMatchers("/api/fitbit/**").permitAll()
+
+
 
 						// ✅ Allow ALL Strava endpoints without authentication
 						.requestMatchers("/api/strava/**").permitAll()
