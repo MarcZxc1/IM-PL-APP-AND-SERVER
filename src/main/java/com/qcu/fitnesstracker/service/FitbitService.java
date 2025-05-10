@@ -77,6 +77,18 @@ public class FitbitService {
 		return fetchFromFitbit(url, accessToken);
 	}
 
+	// Fetch calories consumed (nutrition) for a specific date
+	public String getCaloriesIn(String accessToken, String date) {
+		String url = API_URL + "foods/log/caloriesIn/date/" + date + "/1d.json";
+		return fetchFromFitbit(url, accessToken);
+	}
+
+	// Fetch sleep data for a specific date
+	public String getSleep(String accessToken, String date) {
+		String url = API_URL + "sleep/date/" + date + ".json";
+		return fetchFromFitbit(url, accessToken);
+	}
+
 	// Helper method to make the API call to Fitbit
 	private String fetchFromFitbit(String url, String accessToken) {
 		RestTemplate restTemplate = new RestTemplate();
@@ -93,5 +105,6 @@ public class FitbitService {
 
 		// Return the response body (JSON data)
 		return response.getBody();
+
 	}
 }
