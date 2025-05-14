@@ -15,6 +15,10 @@ public class SecurityConfig {
 	@Bean
 	public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
 		http
+				.csrf(csrf -> csrf
+						.ignoringRequestMatchers("/api/**")
+				)
+
 				.authorizeHttpRequests(auth -> auth
 						.requestMatchers("/auth/google-login", "/oauth2/**", "/auth/logout").permitAll()
 						.requestMatchers("/api/workouts/nearby", "/auth/success").permitAll()
@@ -26,6 +30,8 @@ public class SecurityConfig {
 						.requestMatchers("/api/fitbit/steps").permitAll()
 						.requestMatchers("/api/fitbit/callback").permitAll()
 						.requestMatchers("/api/fitbit/energy").permitAll()
+
+						.requestMatchers("/api/user/**").permitAll()
 
 
 						.requestMatchers("/api/fitbit/**").permitAll()
