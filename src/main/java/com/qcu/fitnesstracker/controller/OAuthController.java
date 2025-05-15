@@ -1,99 +1,264 @@
 package com.qcu.fitnesstracker.controller;
 
 import com.qcu.fitnesstracker.model.GoogleUser;
+import com.qcu.fitnesstracker.model.User;
 import com.qcu.fitnesstracker.repository.GoogleUserRepository;
+import com.qcu.fitnesstracker.repository.UserRepository;
+import com.qcu.fitnesstracker.service.AuthTokenStore;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
+import org.springframework.security.oauth2.client.annotation.RegisteredOAuth2AuthorizedClient;
 import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
+import org.springframework.security.oauth2.core.oidc.user.OidcUser;
+import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.client.RestTemplate;
+import org.springframework.web.client.HttpStatusCodeException;
+import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpServerErrorException;
 
+import java.util.HashMap;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/auth")
+@RequestMapping("/api")
+@CrossOrigin(origins = "*")
 public class OAuthController {
 
+
+	@Autowired
+	private AuthTokenStore tokenStore;
+
 	private final GoogleUserRepository googleUserRepository;
+	private final UserRepository userRepository;
+	private final AuthenticationManager authenticationManager;
+	private final PasswordEncoder passwordEncoder;
 
-	public OAuthController(GoogleUserRepository googleUserRepository) {
+	public OAuthController(GoogleUserRepository googleUserRepository,
+						   UserRepository userRepository,
+						   AuthenticationManager authenticationManager,
+						   PasswordEncoder passwordEncoder) {
 		this.googleUserRepository = googleUserRepository;
+		this.userRepository = userRepository;
+		this.authenticationManager = authenticationManager;
+		this.passwordEncoder = passwordEncoder;
 	}
 
+	@PostMapping("/register")
+	public ResponseEntity<?> register(@RequestBody Map<String, String> userData) {
+		try {
+			String email = userData.get("email");
+			String password = userData.get("password");
+			String firstName = userData.get("firstName");
+			String lastName = userData.get("lastName");
+
+			if (email == null || password == null || firstName == null || lastName == null) {
+				return ResponseEntity.badRequest().body("All fields are required");
+			}
+
+			// Check if user already exists in either repository
+			if (userRepository.existsByEmail(email) || googleUserRepository.findByEmail(email) != null) {
+				return ResponseEntity.status(HttpStatus.CONFLICT).body("User already exists");
+			}
+
+			// Create new regular user
+			User newUser = new User();
+			newUser.setEmail(email);
+			newUser.setPassword(passwordEncoder.encode(password));
+			newUser.setFirstName(firstName);
+			newUser.setLastName(lastName);
+
+			userRepository.save(newUser);
+
+			// Create response map
+			Map<String, Object> responseMap = new HashMap<>();
+			responseMap.put("message", "Registration successful");
+			responseMap.put("email", email);
+			responseMap.put("name", firstName + " " + lastName);
+
+			return ResponseEntity.ok(responseMap);
+		} catch (Exception e) {
+			e.printStackTrace();
+			return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+					.body("An error occurred during registration: " + e.getMessage());
+		}
+	}
+	// ... existing code ...
 	@PostMapping("/login")
-	public ResponseEntity<?> login(@RequestBody Map<String, String> credentials) {
-		String email = credentials.get("email");
-		String rawPassword = credentials.get("password");
+	public ResponseEntity<?> login(@RequestBody Map<String, String> credentials, HttpSession session) {
+		try {
+			String email = credentials.get("email");
+			String password = credentials.get("password");
 
-		GoogleUser user = googleUserRepository.findByEmail(email);
+			if (email == null || password == null) {
+				return ResponseEntity.badRequest().body("Email and password are required");
+			}
 
-		if (user == null) {
-			System.err.println("❌ User not found: " + email);
-			return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("User not found");
-		}
+			// Try to authenticate
+			Authentication authentication = authenticationManager.authenticate(
+					new UsernamePasswordAuthenticationToken(email, password)
+			);
 
-		// ✅ Compare passwords directly (No hashing)
-		if (!rawPassword.equals(user.getPassword())) {
-			System.err.println("❌ Password mismatch for user: " + email);
+			// Check both repositories for user info
+			User regularUser = userRepository.findByEmail(email);
+			GoogleUser googleUser = googleUserRepository.findByEmail(email);
+
+			Map<String, Object> userInfo = new HashMap<>();
+			if (regularUser != null) {
+				// Store user info in session
+				session.setAttribute("USER_EMAIL", regularUser.getEmail());
+				session.setAttribute("USER_NAME", regularUser.getFirstName() + " " + regularUser.getLastName());
+
+				userInfo.put("id", regularUser.getId());
+				userInfo.put("email", regularUser.getEmail());
+				userInfo.put("name", regularUser.getFirstName() + " " + regularUser.getLastName());
+			} else if (googleUser != null) {
+				// Store user info in session
+				session.setAttribute("USER_EMAIL", googleUser.getEmail());
+				session.setAttribute("USER_NAME", googleUser.getName());
+				session.setAttribute("USER_PICTURE", googleUser.getPicture());
+
+				userInfo.put("id", googleUser.getGoogleId());
+				userInfo.put("email", googleUser.getEmail());
+				userInfo.put("name", googleUser.getName());
+				userInfo.put("picture", googleUser.getPicture());
+			}
+
+			return ResponseEntity.ok(userInfo);
+		} catch (AuthenticationException e) {
 			return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Invalid credentials");
+		} catch (Exception e) {
+			e.printStackTrace();
+			return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+					.body("An error occurred during login: " + e.getMessage());
+		}
+	}
+// ... existing code ...
+		@GetMapping("/status")
+		public ResponseEntity<?> checkTokenStatus(@RequestHeader(value = "Authorization", required = false) String authHeader) {
+			try {
+				if (authHeader != null && authHeader.startsWith("Bearer ")) {
+					String token = authHeader.substring(7);
+					String email = tokenStore.getUsername(token);
+					
+					if (email != null) {
+						// Check both repositories for user info
+						User regularUser = userRepository.findByEmail(email);
+						GoogleUser googleUser = googleUserRepository.findByEmail(email);
+
+						Map<String, Object> status = new HashMap<>();
+						status.put("authenticated", true);
+						
+						if (regularUser != null) {
+							status.put("email", regularUser.getEmail());
+							status.put("name", regularUser.getFirstName() + " " + regularUser.getLastName());
+						} else if (googleUser != null) {
+							status.put("email", googleUser.getEmail());
+							status.put("name", googleUser.getName());
+							status.put("picture", googleUser.getPicture());
+						}
+						
+						return ResponseEntity.ok(status);
+					}
+				}
+				return ResponseEntity.ok(Map.of("authenticated", false));
+			} catch (Exception e) {
+				e.printStackTrace();
+				return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error checking authentication status");
+			}
 		}
 
-		return ResponseEntity.ok("Login successful");
+	@GetMapping("/token")
+	public Map<String, Object> getToken(
+			@RegisteredOAuth2AuthorizedClient("google") OAuth2AuthorizedClient authorizedClient,
+			OAuth2AuthenticationToken authentication
+	) {
+		String accessToken = authorizedClient.getAccessToken().getTokenValue();
+
+		return Map.of(
+				"accessToken", accessToken,
+				"principal", authentication.getPrincipal().getAttributes()
+		);
 	}
 
-//	@GetMapping("/success")
-//	public String loginSuccess(OAuth2AuthenticationToken authentication, HttpServletRequest request) {
-//		HttpSession session = request.getSession(true);
-//		String googleId = authentication.getPrincipal().getAttribute("sub");
-//		String email = authentication.getPrincipal().getAttribute("email");
-//		String name = authentication.getPrincipal().getAttribute("name");
-//		String picture = authentication.getPrincipal().getAttribute("picture");
-//
-//		session.setAttribute("LOGGED_IN_USER", googleId);
-//		System.out.println("✅ User logged in: " + email);
-//
-//		GoogleUser existingUser = googleUserRepository.findByGoogleId(googleId);
-//
-//		if (existingUser == null) {
-//			GoogleUser newUser = new GoogleUser(googleId, email, name, picture, null);
-//			googleUserRepository.save(newUser);
-//		}
-//
-//		return "<html style='display: flex; justify-content: center; align-items: center; height: 100vh;'>" +
-//				"<body><h1 style='text-align: center;'>Login Successful!</h1>" +
-//				"<p style='text-align: center;'>You can now close this tab.</p></body></html>";
-//	}
-
-
-	@GetMapping("/api/user")
-	public ResponseEntity<?> getUserInfo(HttpSession session) {
-		String loggedInUser = (String) session.getAttribute("LOGGED_IN_USER");
-		if (loggedInUser == null) {
+	@GetMapping("/user")
+	public ResponseEntity<?> getUserInfo(@AuthenticationPrincipal OAuth2User principal, HttpSession session) {
+		if (principal == null) {
 			return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("No user is logged in.");
 		}
-		GoogleUser user = googleUserRepository.findByGoogleId(loggedInUser);
-		return ResponseEntity.ok(user);
+
+		try {
+			String googleId = principal.getAttribute("sub");
+			String email = principal.getAttribute("email");
+			String name = principal.getAttribute("name");
+			String picture = principal.getAttribute("picture");
+
+			// Store user info in session
+			session.setAttribute("LOGGED_IN_USER", googleId);
+			session.setAttribute("USER_EMAIL", email);
+			session.setAttribute("USER_NAME", name);
+			session.setAttribute("USER_PICTURE", picture);
+
+			// Check if user exists in database
+			GoogleUser existingUser = googleUserRepository.findByEmail(email);
+			if (existingUser == null) {
+				// Create new user if doesn't exist
+				GoogleUser newUser = new GoogleUser();
+				newUser.setGoogleId(googleId);
+				newUser.setEmail(email);
+				newUser.setName(name);
+				newUser.setPicture(picture);
+				googleUserRepository.save(newUser);
+				existingUser = newUser;
+			}
+
+			Map<String, Object> userInfo = new HashMap<>();
+			userInfo.put("id", googleId);
+			userInfo.put("email", email);
+			userInfo.put("name", name);
+			userInfo.put("picture", picture);
+
+			return ResponseEntity.ok(userInfo);
+		} catch (Exception e) {
+			e.printStackTrace();
+			return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error processing user info");
+		}
 	}
 
 	@GetMapping("/logout")
 	public ResponseEntity<?> logout(HttpServletRequest request, HttpServletResponse response, HttpSession session) {
-		if (session != null) {
-			session.invalidate();
+		try {
+			if (session != null) {
+				session.invalidate();
+			}
+
+			SecurityContextHolder.clearContext();
+
+			Cookie cookie = new Cookie("JSESSIONID", null);
+			cookie.setHttpOnly(true);
+			cookie.setSecure(true);
+			cookie.setPath("/");
+			cookie.setMaxAge(0);
+			response.addCookie(cookie);
+
+			return ResponseEntity.ok("User logged out successfully.");
+		} catch (Exception e) {
+			e.printStackTrace();
+			return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error during logout");
 		}
-
-		SecurityContextHolder.clearContext();
-
-		Cookie cookie = new Cookie("JSESSIONID", null);
-		cookie.setHttpOnly(true);
-		cookie.setSecure(true);
-		cookie.setPath("/");
-		cookie.setMaxAge(0);
-		response.addCookie(cookie);
-
-		return ResponseEntity.ok("User logged out successfully.");
 	}
 }

@@ -22,6 +22,22 @@ public class GoogleUser {
 		this.password = password; // ✅ Store password as plain text
 	}
 
+	public void setEmail(String email) {
+		this.email = email;
+	}
+
+	public void setGoogleId(String googleId) {
+		this.googleId = googleId;
+	}
+
+	public void setName(String name) {
+		this.name = name;
+	}
+
+	public void setPicture(String picture) {
+		this.picture = picture;
+	}
+
 	// ✅ Getters
 	public String getGoogleId() { return googleId; }
 	public String getEmail() { return email; }
