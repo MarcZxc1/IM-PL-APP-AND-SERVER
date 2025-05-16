@@ -1,5 +1,6 @@
 package com.qcu.fitnesstracker.config;
 
+import jakarta.servlet.http.HttpSession;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -11,6 +12,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.firewall.HttpFirewall;
 import org.springframework.security.web.firewall.StrictHttpFirewall;
@@ -87,7 +89,17 @@ public class SecurityConfig {
 				.oauth2Login(oauth -> oauth
 						.loginPage("/auth/google-login")
 						.defaultSuccessUrl("/auth/success", true)
+						.successHandler((request, response, authentication) -> {
+							// This ensures session is properly set before redirect
+							HttpSession session = request.getSession();
+							OAuth2User oauthUser = (OAuth2User) authentication.getPrincipal();
 
+							session.setAttribute("AUTHENTICATED", true);
+							session.setAttribute("USER_EMAIL", oauthUser.getAttribute("email"));
+							session.setAttribute("USER_NAME", oauthUser.getAttribute("name"));
+
+							response.sendRedirect("/auth/success");
+						})
 				)
 				.logout(logout -> logout
 						.logoutRequestMatcher(new AntPathRequestMatcher("/auth/logout"))
