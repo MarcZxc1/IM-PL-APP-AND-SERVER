@@ -69,6 +69,7 @@ public class SecurityConfig {
 
 
 						.requestMatchers("/api/fitbit/**").permitAll()
+						.requestMatchers("/api/oauth/**").permitAll()
 
 
 

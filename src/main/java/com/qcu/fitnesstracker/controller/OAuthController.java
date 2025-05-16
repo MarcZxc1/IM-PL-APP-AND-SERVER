@@ -149,12 +149,45 @@ public class OAuthController {
 	}
 // ... existing code ...
 		@GetMapping("/status")
-		public ResponseEntity<?> checkTokenStatus(@RequestHeader(value = "Authorization", required = false) String authHeader) {
+		public ResponseEntity<?> checkTokenStatus(
+				@RequestHeader(value = "Authorization", required = false) String authHeader,
+				@RequestHeader(value = "Cookie", required = false) String cookieHeader,
+				HttpSession session) {
 			try {
+				System.out.println("[DEBUG] Checking auth status for session: " + session.getId());
+				System.out.println("[DEBUG] Cookie header: " + cookieHeader);
+
+				// First check session authentication
+				Boolean sessionAuthenticated = (Boolean) session.getAttribute("AUTHENTICATED");
+				String sessionEmail = (String) session.getAttribute("USER_EMAIL");
+				String sessionName = (String) session.getAttribute("USER_NAME");
+				String sessionPicture = (String) session.getAttribute("USER_PICTURE");
+
+				System.out.println("[DEBUG] Session attributes - authenticated: " + sessionAuthenticated +
+								 ", email: " + sessionEmail +
+								 ", name: " + sessionName);
+
+				if (sessionAuthenticated != null && sessionAuthenticated) {
+					// Verify user exists in MongoDB
+					GoogleUser googleUser = googleUserRepository.findByEmail(sessionEmail);
+					if (googleUser != null) {
+						Map<String, Object> status = new HashMap<>();
+						status.put("authenticated", true);
+						status.put("email", sessionEmail);
+						status.put("name", sessionName);
+						status.put("picture", sessionPicture);
+						System.out.println("[DEBUG] Returning authenticated status from session and MongoDB");
+						return ResponseEntity.ok(status);
+					}
+				}
+
+				// If session check fails, try token authentication
 				if (authHeader != null && authHeader.startsWith("Bearer ")) {
 					String token = authHeader.substring(7);
 					String email = tokenStore.getUsername(token);
-					
+
+					System.out.println("[DEBUG] Checking token authentication for email: " + email);
+
 					if (email != null) {
 						// Check both repositories for user info
 						User regularUser = userRepository.findByEmail(email);
@@ -162,23 +195,38 @@ public class OAuthController {
 
 						Map<String, Object> status = new HashMap<>();
 						status.put("authenticated", true);
-						
+
 						if (regularUser != null) {
 							status.put("email", regularUser.getEmail());
 							status.put("name", regularUser.getFirstName() + " " + regularUser.getLastName());
+							System.out.println("[DEBUG] Found regular user: " + regularUser.getEmail());
 						} else if (googleUser != null) {
 							status.put("email", googleUser.getEmail());
 							status.put("name", googleUser.getName());
 							status.put("picture", googleUser.getPicture());
+							System.out.println("[DEBUG] Found Google user: " + googleUser.getEmail());
 						}
-						
+
+						// Update session with user info
+						session.setAttribute("AUTHENTICATED", true);
+						session.setAttribute("USER_EMAIL", status.get("email"));
+						session.setAttribute("USER_NAME", status.get("name"));
+						if (status.containsKey("picture")) {
+							session.setAttribute("USER_PICTURE", status.get("picture"));
+						}
+
+						System.out.println("[DEBUG] Returning authenticated status from token");
 						return ResponseEntity.ok(status);
 					}
 				}
+
+				System.out.println("[DEBUG] No valid authentication found");
 				return ResponseEntity.ok(Map.of("authenticated", false));
 			} catch (Exception e) {
+				System.err.println("[ERROR] Error checking authentication status: " + e.getMessage());
 				e.printStackTrace();
-				return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error checking authentication status");
+				return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+						.body("Error checking authentication status: " + e.getMessage());
 			}
 		}
 
